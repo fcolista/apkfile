@@ -1,0 +1,57 @@
+#!/bin/sh
+_ver=0.01
+file=$1
+arch=${2:-x86_64}
+branch=${3:-edge}
+
+valid_branch="v3.3 v3.4 v3.5 v3.6 v3.7 v3.8 v3.9 v3.10 v3.11 v3.12 v3.13 v3.14 v3.15 edge all"
+valid_arch="armv7 s390x ppc64le armhf aarch64 x86 x86_64 all"
+
+>/tmp/branches
+
+check() {
+	for pkg in curl html2text; do
+		apk info -eq $pkg
+		if [ $? -ne 0 ]; then
+			echo -e "\nERROR: Please install first $pkg with apk add $pkg\n" 
+			exit 1
+		fi
+	done
+}
+
+usage() {
+	echo -e "\nUsage: $0 <pattern> [arch] [branch]\n"
+	echo -e "\t<pattern>: Mandatory. Is the file you are searching. Supports wildcards (e.g. wge*) "
+	echo -e "\t[arch]: Optional (default:  x86_64). Architecture. Valid values: $valid_arch"
+	echo -e "\t[branch]: Optional (default: edge). Alpine releases. Valid values: $valid_branch\n"
+	exit 1;
+}
+
+query() {
+	curl -s -d"$1" -H "application/x-www-form-urlencoded" -X GET https://pkgs.alpinelinux.org/contents | sed "s/&#x2F;/\//g" | html2text -nobs -to_encoding ASCII | sed /^$/d | sed '1d' | awk /^File/,/*Copy*/ |grep -vE 'Privacy|Policy'
+}
+
+get_versions() {
+	curl -s -q http://dl-cdn.alpinelinux.org/alpine/ | sed 's/<[^>]*>//g' | cut -d \/ -f1| grep v >> /tmp/branches
+	valid_branch=$(cat /tmp/branches)
+	valid_branch="$valid_branch edge all"
+}
+
+check
+if ! [ $file ] ; then usage; fi
+echo $valid_arch | grep -qi $arch || ( echo "Invalid arch. Valid values are: $valid_arch"; exit 1 )
+echo $valid_branch | grep -qi $branch || ( echo "Invalid branch. Valid values are: $valid_branch"; exit 1 )
+
+if [ $branch == "all" ]; then
+	if [ $arch == "all" ]; then
+		for b in $valid_branch; do
+			query "branch=$b&file=$file"
+		done
+	else
+		for b in $valid_branch; do
+			query "branch=$b&file=$file&arch=$arch"
+		done
+	fi
+else
+	query "branch=$branch&file=$file&arch=$arch"
+fi
