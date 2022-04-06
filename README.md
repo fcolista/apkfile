@@ -8,7 +8,8 @@ So, only the version and arches in that web page are supported.
 
 Since (again) this script is stupid, it does not pickup automatically the new alpine versions :)
 
-## Install
+## Requirements
+
 `apkfile` depends on two packages: `curl` and `html2text`.
 
 You sohuld add these in advance with:
@@ -17,7 +18,11 @@ You sohuld add these in advance with:
 apk add curl html2text
 ```
 
-Then just copy `apkfile` in `/usr/bin`.
+## Install
+
+```
+$ sudo make install
+```
 
 ## Usage
 
