@@ -1,9 +1,8 @@
 # apkfile
 Search files inside various version of alpine linux packages
 
-Just copy `apkfile` in `/usr/bin` and run it with the file you are looking for.
-
 This is a stupid script that parses the output of https://pkgs.alpinelinux.org
+
 So, only the version and arches in that web page are supported.
 
 Since (again) this script is stupid, it does not pickup automatically the new alpine versions :)
@@ -28,11 +27,19 @@ $ sudo make install
 
 ```
 $ apkfile
-Usage: ./apkfile <pattern> [arch] [branch]
+usage: ./apkfile [-hc] [PATTERN] [ARCH] [BRANCH]
 
-        <pattern>: Mandatory. Is the file you are searching. Supports wildcards (e.g. wge*) 
-        [arch]: Optional (default:  x86_64). Architecture. Valid values: armv7 s390x ppc64le armhf aarch64 x86 x86_64 all
-        [branch]: Optional (default: edge). Alpine releases. Valid values: v3.3 v3.4 v3.5 v3.6 v3.7 v3.8 v3.9 v3.10 v3.11 v3.12 v3.13 v3.14 v3.15 edge all
+Search a file inside all the alpine packages.
+
+PATTERN is the file you are looking for. Supports wildcards (e.g. wge*).
+
+ARCH is optional. Default x86_64
+
+BRANCH is optional. Default: edge
+
+options:
+ -h  Show this help
+ -c  Check if new versions and/or arches are available
 ```
 
 ## Examples
@@ -40,7 +47,7 @@ Usage: ./apkfile <pattern> [arch] [branch]
 Find `grep` file:
 
 ```
-$ /usr/bin/apkfile grep
+$ apkfile grep
 File                            Package         Branch Repository Architecture
 /usr/share/quilt/grep           quilt           edge   testing    x86_64
 /bin/grep                       grep            edge   main       x86_64
@@ -62,7 +69,7 @@ gateways/telnet
 Find `telnet` within all archs supported by alpine:
 
 ```
-$ ./apkfile telnet all
+$ apkfile telnet all
 File                           Package          Branch Repository Architecture
 /usr/share/webapps/RackTables/ racktables       edge   community  x86_64
 gateways/telnet
@@ -93,7 +100,7 @@ gateways/telnet
 Find `telnet` in all arches but only within v3.12:
 
 ```
-$ ./apkfile telnet all v3.12
+$ apkfile telnet all v3.12
 File                           Package    Branch Repository Architecture
 /usr/share/webapps/RackTables/ racktables v3.12  community  x86_64
 gateways/telnet
