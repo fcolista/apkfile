@@ -119,3 +119,33 @@ gateways/telnet
 /usr/share/webapps/RackTables/ racktables v3.12  community  mips64
 gateways/telnet
 ```
+
+# Containers
+
+## Docker
+
+Build the image:
+
+```
+$ docker image build -t fcolista/apkfile .
+```
+
+Run the container:
+
+```
+$ docker container run --rm --name apkfile fcolista/apkfile telnet
+```
+
+## Podman
+
+Build the image:
+
+```
+$ doas podman build -t fcolista/apkfile .
+```
+
+Run the container:
+
+```
+$ doas podman run localhost/fcolista/apkfile telnet
+```
