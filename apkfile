@@ -51,7 +51,7 @@ usage() {
 }
 
 query() {
-	curl -s -d"$1" -H "application/x-www-form-urlencoded" -X GET $_apiurl/contents	| sed "s/&#x2F;/\//g" | html2text -nobs -to_encoding ASCII 	| sed /^$/d | sed '1d' | awk /^File/,/*Copy*/ |grep -vE 'Privacy|Policy'
+	curl -s -d"$1" -H "application/x-www-form-urlencoded" -X GET $_apiurl/contents	| sed "s/&#x2F;/\//g" | html2text -nobs -to_encoding ASCII 	| sed /^$/d | sed '1d' | awk /^File/,/Copy/ |grep -vE 'Privacy|Policy'
 }
 
 check && if ! [ $pattern ] ; then usage; fi
