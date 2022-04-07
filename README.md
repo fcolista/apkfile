@@ -11,7 +11,7 @@ Since (again) this script is stupid, it does not pickup automatically the new al
 
 `apkfile` depends on two packages: `curl` and `html2text`.
 
-You sohuld add these in advance with:
+You should add these in advance with:
 
 ```
 apk add curl html2text
