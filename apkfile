@@ -58,8 +58,9 @@ check && if ! [ $pattern ] ; then usage; fi
 
 while getopts "hc" opt; do
 	case $opt in
-		h) usage; break ;;
-		c) webcheck; break ;;
+		h) usage ;;
+		c) webcheck ;;
+		*) exit 1 ;;
 	esac
 done
 
