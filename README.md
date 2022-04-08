@@ -1,11 +1,11 @@
 # apkfile
-Search files inside various version of alpine linux packages
+Search files inside various versions of Alpine Linux packages
 
 This is a stupid script that parses the output of https://pkgs.alpinelinux.org
 
-So, only the version and arches in that web page are supported.
+So, only the versions and arches in that web page are supported.
 
-Since (again) this script is stupid, it does not pickup automatically the new alpine versions :)
+Since (again) this script is stupid, it does not pickup automatically the new Alpine versions :)
 
 ## Requirements
 
