@@ -1,5 +1,5 @@
 #!/bin/sh
-_ver=0.02
+_ver=0.03
 _apiurl="https://pkgs.alpinelinux.org"
 
 pattern=$1

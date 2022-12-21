@@ -1,5 +1,5 @@
 NAME = apkfile
-VERSION = 0.02
+VERSION = 0.03
 
 PREFIX?=/usr
 DESTDIR?=$(PREFIX)/bin
