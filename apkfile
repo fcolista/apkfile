@@ -1,5 +1,5 @@
 #!/bin/sh
-_ver=0.06
+_ver=0.07
 _apiurl="https://pkgs.alpinelinux.org"
 
 pattern=$1
@@ -22,7 +22,7 @@ check() {
 webcheck() {
 	local _tmp=$(mktemp)
 	curl -q -s $_apiurl/packages>$_tmp
-	local alpine_versions=$(cat $_tmp | html2text | grep -A1 Branch| tr -d '\n' | tr -d ']' | cut -d\/ -f2- | tr '\/' ' ')
+	local alpine_versions=$(cat $_tmp | html2text | grep -A1 Branch|head -1| tr -d '\n' | tr -d ']' | cut -d\/ -f2- | tr '\/' ' ')
 	local alpine_arches=$(cat $_tmp | html2text | grep x86 | cut -d\/ -f2-| tr -d ']'|  tr '\/' ' ')
 	echo -e "\n$_apiurl/packages supports the following alpine versions and architectures:"
 	echo -e "\t=> Versions: $(echo $alpine_versions) all"
@@ -51,7 +51,7 @@ usage() {
 }
 
 query() {
-	curl -s -d"$1" -H "application/x-www-form-urlencoded" -X GET $_apiurl/contents	| sed "s/&#x2F;/\//g" | html2text -nobs -to_encoding ASCII 	| sed /^$/d | sed '1d' | awk /^File/,/Copy/ |grep -vE 'Privacy|Policy'
+	curl --http2 -s -X GET "$_apiurl/contents?$1" | sed "s/&#x2F;/\//g" | html2text -nobs -to_encoding ASCII | sed /^$/d | sed '1d' | awk /^File/,/Copy/ |grep -vE 'Privacy|Policy' | grep -v '*'
 }
 
 check && if ! [ $pattern ] ; then usage; fi
@@ -72,13 +72,13 @@ echo $valid_branch | grep -qi $branch || ( echo "Invalid branch. Valid values ar
 if [ $branch == "all" ]; then
 	if [ $arch == "all" ]; then
 		for b in $valid_branch; do
-			query "branch=$b&file=$pattern"
+			query "file=$pattern&branch=$b"
 		done
 	else
 		for b in $valid_branch; do
-			query "branch=$b&file=$pattern&arch=$arch"
+			query "file=$pattern&branch=$b&arch=$arch"
 		done
 	fi
 else
-	query "branch=$branch&file=$pattern&arch=$arch"
+	query "file=$pattern&branch=$branch&arch=$arch"
 fi
