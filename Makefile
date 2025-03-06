@@ -1,5 +1,5 @@
 NAME = apkfile
-VERSION = 0.08
+VERSION = $(shell git describe --tags --abbrev=0 2>/dev/null || echo "0.08")
 
 PREFIX?=/usr
 DESTDIR?=$(PREFIX)/bin
@@ -22,4 +22,3 @@ docs:
 uninstall:
 	rm -f $(DESTDIR)/$(BIN)
 	rm -rf $(DOC_DIR)
-
