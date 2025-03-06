@@ -1,13 +1,28 @@
 #!/bin/sh
 set -eu
 
-# Automatically set version from Git tags
-_ver=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.08")
+_ver=$(git describe --tags --abbrev=0 2>/dev/null || echo "unset")
 _apiurl="https://pkgs.alpinelinux.org"
+
+CONFIG_FILE="$HOME/.apkfilerc"
+CACHE_DIR="/tmp/apkfile_cache"
+mkdir -p "$CACHE_DIR"
+LOG_FILE="/tmp/apkfile.log"
+
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        . "$CONFIG_FILE"
+    fi
+}
+
+version() {
+    echo "apkfile version $_ver"
+    exit 0
+}
 
 usage() {
     cat <<-EOF
-    usage: $0 [-hc] [PATTERN] [ARCH] [BRANCH]
+    usage: $0 [-hclv] PATTERN [ARCH] [BRANCH]
 
     Search a file inside all the alpine packages.
 
@@ -20,20 +35,31 @@ usage() {
     options:
      -h  Show this help
      -c  Check if new versions and/or architectures are available
+     -l  Log output to $LOG_FILE
+     -v  Show version
 EOF
     exit 1
 }
 
-if [ $# -eq 0 ]; then
-    usage
-fi
+debug() {
+    echo "Debug mode enabled."
+    set -x
+}
 
-pattern=$1
-arch=${2:-x86_64}
-branch=${3:-edge}
+log_to_file() {
+    exec > >(tee -a "$LOG_FILE") 2>&1
+}
 
-valid_arch="x86_64 x86 aarch64 armhf ppc64le s390x armv7 riscv64 loongarch64 all"
-valid_branch="v3.21 v3.20 v3.19 v3.18 v3.17 v3.16 v3.15 v3.14 v3.13 v3.12 v3.11 v3.10 v3.9 v3.8 v3.7 v3.6 v3.5 v3.4 v3.3 edge all"
+get_cached_response() {
+    local url=$1
+    local cache_file="$CACHE_DIR/$(echo "$url" | md5sum | cut -d' ' -f1)"
+
+    if [ -f "$cache_file" ]; then
+        cat "$cache_file"
+    else
+        curl -q -s "$url" | tee "$cache_file"
+    fi
+}
 
 check() {
     for pkg in curl html2text; do
@@ -46,7 +72,7 @@ check() {
 
 webcheck() {
     _tmp=$(mktemp)
-    curl -q -s "$_apiurl/packages" > "$_tmp"
+    get_cached_response "$_apiurl/packages" > "$_tmp"
     alpine_versions=$(html2text < "$_tmp" | grep -A1 Branch | head -1 | tr -d '\n' | tr -d ']' | cut -d/ -f2- | tr '/' ' ')
     alpine_arches=$(html2text < "$_tmp" | sed -n '/Architecture\[/,/\]/ { /Architecture\[/ { s/.*\[//; h; d }; H; /\]/ { x; s/\n//g; p } }' | cut -d\: -f2 | tr [A-Z] [a-z] | tr '/' ' ' |tr -d ']' )
     printf "\n%s/packages supports the following alpine versions and architectures:\n" "$_apiurl"
@@ -57,41 +83,147 @@ webcheck() {
 }
 
 query() {
-    curl --http2 -s -X GET "$_apiurl/contents?$1" | sed "s/&#x2F;/\//g" | html2text -nobs -to_encoding ASCII | sed '/^$/d' | sed '1d' | awk '/^File/,/Copy/' | grep -vE 'Privacy|Policy' | grep -v '*'
+    local query_string="$1"
+    local pattern="$2"
+    local branch="$3"
+    local arch="$4"
+
+    echo -e "\n ==> Searching for '$pattern' in branch '$branch' for arch '$arch'...\n"
+
+    local response
+    response=$(curl --max-time 10 --http2 -s -X GET "$_apiurl/contents?$query_string")
+
+    local html_file=$(mktemp)
+    local output_file=$(mktemp)
+
+    echo "$response" > "$html_file"
+
+    html2text -width 200 -nobs -to_encoding ASCII "$html_file" | 
+        sed "s/&#x2F;/\//g" > "$output_file"
+
+    if grep -q "Contents filter" "$output_file"; then
+        local line_number=$(grep -n "File " "$output_file" | head -1 | cut -d: -f1)
+
+        if [ -n "$line_number" ]; then
+            echo "File                                                 Package         Branch Repository Architecture"
+            echo "---------------------------------------------------------------------------------------------------"
+
+            tail -n +$line_number "$output_file" |
+                grep -v "Path\|Package name\|Branch\|Repository\|Contents filter" |
+                grep -v "^\s*$" | 
+                grep -v "Privacy\|Policy\|Copy\|\*\|One of\|mips64" |
+                grep -E '^\/|^File' |
+                awk '{
+                    if (NF >= 5) {
+                        printf "%-50s %-15s %-7s %-12s %s\n", $1, $2, $3, $4, $5
+                    } else {
+                        print
+                    }
+                }'
+
+            local match_count=$(tail -n +$line_number "$output_file" | grep -c "^/")
+            echo ""
+            echo "Found $match_count matches."
+        else
+            echo "No file data found in response."
+        fi
+    else
+        grep -v "^\s*$" "$output_file" | 
+            grep -v "Privacy\|Policy\|Copy\|\*\|Path\|Package name\|Branch\|Repository\|Architecture\|Contents filter\|One of\|mips64" |
+            awk '{
+                if (NF >= 5 && $1 ~ /^\//) {
+                    printf "%-50s %-15s %-7s %-12s %s\n", $1, $2, $3, $4, $5
+                } else {
+                    print
+                }
+            }'
+
+        local match_count=$(grep -c "^/" "$output_file")
+
+        if [ "$match_count" -gt 0 ]; then
+            echo ""
+            echo "Found $match_count matches."
+        else
+            echo "No matches found."
+        fi
+    fi
+
+    rm "$html_file" "$output_file"
+    echo "--------------------------------------------------------"
 }
 
-check
+normalize_branch() {
+    local branch="$1"
+    if echo "$branch" | grep -q '^[0-9]'; then
+        echo "v$branch"
+    else
+        echo "$branch"
+    fi
+}
 
-while getopts "hc" opt; do
+load_config
+
+while getopts "hclv" opt; do
     case "$opt" in
         h) usage ;;
         c) webcheck ;;
+        l) log_to_file ;;
+        v) version ;;
         *) exit 1 ;;
     esac
 done
 
 shift $((OPTIND - 1))
 
-if ! echo "$valid_arch" | grep -qi "$arch"; then
-    printf "Invalid arch. Valid values are: %s\n" "$valid_arch"
+if [ $# -eq 0 ]; then
+    usage
+fi
+
+pattern="$1"
+arch="x86_64"
+branch="edge"
+
+if [ $# -ge 2 ]; then
+    second_arg="$2"
+
+    if echo "$second_arg" | grep -q '^v[0-9]' || echo "$second_arg" | grep -q '^[0-9]'; then
+        branch=$(normalize_branch "$second_arg")
+    else
+        arch="$second_arg"
+
+        if [ $# -ge 3 ]; then
+            branch=$(normalize_branch "$3")
+        fi
+    fi
+fi
+
+valid_arch="x86_64 x86 aarch64 armhf ppc64le s390x armv7 riscv64 loongarch64 all"
+valid_branch="v3.21 v3.20 v3.19 v3.18 v3.17 v3.16 v3.15 v3.14 v3.13 v3.12 v3.11 v3.10 v3.9 v3.8 v3.7 v3.6 v3.5 v3.4 v3.3 edge all"
+
+if ! echo "$valid_arch" | grep -qw "$arch"; then
+    printf "Invalid arch '%s'. Valid values are: %s\n" "$arch" "$valid_arch"
     exit 1
 fi
 
-if ! echo "$valid_branch" | grep -qi "$branch"; then
-    printf "Invalid branch. Valid values are: %s\n" "$valid_branch"
+if ! echo "$valid_branch" | grep -qw "$branch"; then
+    printf "Invalid branch '%s'. Valid values are: %s\n" "$branch" "$valid_branch"
     exit 1
 fi
 
 if [ "$branch" = "all" ]; then
     if [ "$arch" = "all" ]; then
         for b in $valid_branch; do
-            query "file=$pattern&branch=$b"
+            if [ "$b" != "all" ]; then
+                query "file=$pattern&branch=$b" "$pattern" "$b" "all"
+            fi
         done
     else
         for b in $valid_branch; do
-            query "file=$pattern&branch=$b&arch=$arch"
+            if [ "$b" != "all" ]; then
+                query "file=$pattern&branch=$b&arch=$arch" "$pattern" "$b" "$arch"
+            fi
         done
     fi
 else
-    query "file=$pattern&branch=$branch&arch=$arch"
+    query "file=$pattern&branch=$branch&arch=$arch" "$pattern" "$branch" "$arch"
 fi
