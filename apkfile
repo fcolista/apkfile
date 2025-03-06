@@ -1,6 +1,32 @@
 #!/bin/sh
-_ver=0.08
+set -eu
+
+# Automatically set version from Git tags
+_ver=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.08")
 _apiurl="https://pkgs.alpinelinux.org"
+
+usage() {
+    cat <<-EOF
+    usage: $0 [-hc] [PATTERN] [ARCH] [BRANCH]
+
+    Search a file inside all the alpine packages.
+
+    PATTERN is the file you are looking for. Supports wildcards (e.g., wge*).
+
+    ARCH is optional. Default: x86_64
+
+    BRANCH is optional. Default: edge
+
+    options:
+     -h  Show this help
+     -c  Check if new versions and/or architectures are available
+EOF
+    exit 1
+}
+
+if [ $# -eq 0 ]; then
+    usage
+fi
 
 pattern=$1
 arch=${2:-x86_64}
@@ -10,75 +36,62 @@ valid_arch="x86_64 x86 aarch64 armhf ppc64le s390x armv7 riscv64 loongarch64 all
 valid_branch="v3.21 v3.20 v3.19 v3.18 v3.17 v3.16 v3.15 v3.14 v3.13 v3.12 v3.11 v3.10 v3.9 v3.8 v3.7 v3.6 v3.5 v3.4 v3.3 edge all"
 
 check() {
-	for pkg in curl html2text; do
-		apk info -eq $pkg
-		if [ $? -ne 0 ]; then
-			echo -e "\nERROR: Please install first $pkg with apk add $pkg\n" 
-			exit 1
-		fi
-	done
+    for pkg in curl html2text; do
+        if ! apk info -eq "$pkg" >/dev/null 2>&1; then
+            printf "\nERROR: Please install %s first with 'apk add %s'\n" "$pkg" "$pkg"
+            exit 1
+        fi
+    done
 }
 
 webcheck() {
-	local _tmp=$(mktemp)
-	curl -q -s $_apiurl/packages>$_tmp
-	local alpine_versions=$(cat $_tmp | html2text | grep -A1 Branch|head -1| tr -d '\n' | tr -d ']' | cut -d\/ -f2- | tr '\/' ' ')
-	local alpine_arches=$(cat $_tmp | html2text | grep x86 | cut -d\/ -f2-| tr -d ']'|  tr '\/' ' ')
-	echo -e "\n$_apiurl/packages supports the following alpine versions and architectures:"
-	echo -e "\t=> Versions: $(echo $alpine_versions) all"
-	echo -e "\t=> Architectures: $(echo $alpine_arches) all\n"
-	rm $_tmp && exit 0
-}
-
-usage() {
-	cat <<-__EOF__
-	usage: $0 [-hc] [PATTERN] [ARCH] [BRANCH]
-
-	Search a file inside all the alpine packages.
-
-	PATTERN is the file you are looking for. Supports wildcards (e.g. wge*).
-
-	ARCH is optional. Default x86_64
-
-	BRANCH is optional. Default: edge
-
-	options:
-	 -h  Show this help
-	 -c  Check if new versions and/or arches are available
-
-	__EOF__
-	exit 1
+    _tmp=$(mktemp)
+    curl -q -s "$_apiurl/packages" > "$_tmp"
+    alpine_versions=$(html2text < "$_tmp" | grep -A1 Branch | head -1 | tr -d '\n' | tr -d ']' | cut -d/ -f2- | tr '/' ' ')
+    alpine_arches=$(html2text < "$_tmp" | sed -n '/Architecture\[/,/\]/ { /Architecture\[/ { s/.*\[//; h; d }; H; /\]/ { x; s/\n//g; p } }' | cut -d\: -f2 | tr [A-Z] [a-z] | tr '/' ' ' |tr -d ']' )
+    printf "\n%s/packages supports the following alpine versions and architectures:\n" "$_apiurl"
+    printf "\t=> Versions: %s\n" "$alpine_versions"
+    printf "\t=> Architectures: %s\n" "$alpine_arches"
+    rm "$_tmp"
+    exit 0
 }
 
 query() {
-	curl --http2 -s -X GET "$_apiurl/contents?$1" | sed "s/&#x2F;/\//g" | html2text -nobs -to_encoding ASCII | sed /^$/d | sed '1d' | awk /^File/,/Copy/ |grep -vE 'Privacy|Policy' | grep -v '*'
+    curl --http2 -s -X GET "$_apiurl/contents?$1" | sed "s/&#x2F;/\//g" | html2text -nobs -to_encoding ASCII | sed '/^$/d' | sed '1d' | awk '/^File/,/Copy/' | grep -vE 'Privacy|Policy' | grep -v '*'
 }
 
-check && if ! [ $pattern ] ; then usage; fi
+check
 
 while getopts "hc" opt; do
-	case $opt in
-		h) usage ;;
-		c) webcheck ;;
-		*) exit 1 ;;
-	esac
+    case "$opt" in
+        h) usage ;;
+        c) webcheck ;;
+        *) exit 1 ;;
+    esac
 done
 
-shift $(($OPTIND - 1))
+shift $((OPTIND - 1))
 
-echo $valid_arch | grep -qi $arch || ( echo "Invalid arch. Valid values are: $valid_arch"; exit 1 )
-echo $valid_branch | grep -qi $branch || ( echo "Invalid branch. Valid values are: $valid_branch"; exit 1 )
+if ! echo "$valid_arch" | grep -qi "$arch"; then
+    printf "Invalid arch. Valid values are: %s\n" "$valid_arch"
+    exit 1
+fi
 
-if [ $branch == "all" ]; then
-	if [ $arch == "all" ]; then
-		for b in $valid_branch; do
-			query "file=$pattern&branch=$b"
-		done
-	else
-		for b in $valid_branch; do
-			query "file=$pattern&branch=$b&arch=$arch"
-		done
-	fi
+if ! echo "$valid_branch" | grep -qi "$branch"; then
+    printf "Invalid branch. Valid values are: %s\n" "$valid_branch"
+    exit 1
+fi
+
+if [ "$branch" = "all" ]; then
+    if [ "$arch" = "all" ]; then
+        for b in $valid_branch; do
+            query "file=$pattern&branch=$b"
+        done
+    else
+        for b in $valid_branch; do
+            query "file=$pattern&branch=$b&arch=$arch"
+        done
+    fi
 else
-	query "file=$pattern&branch=$branch&arch=$arch"
+    query "file=$pattern&branch=$branch&arch=$arch"
 fi
