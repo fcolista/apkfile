@@ -24,7 +24,7 @@ usage() {
     cat <<-EOF
     usage: $0 [-hclv] PATTERN [ARCH] [BRANCH]
 
-    Search a file inside all the alpine packages.
+    Search a file inside all the Alpine packages.
 
     PATTERN is the file you are looking for. Supports wildcards (e.g., wge*).
 
@@ -47,12 +47,27 @@ debug() {
 }
 
 log_to_file() {
-    exec > >(tee -a "$LOG_FILE") 2>&1
+    PIPE=$(mktemp -u)
+    mkfifo "$PIPE"
+
+    # Start tee in the background
+    tee -a "$LOG_FILE" < "$PIPE" &
+    TEE_PID=$!
+
+    # Redirect stdout and stderr to the pipe
+    exec > "$PIPE" 2>&1
+
+    # Cleanup function
+    cleanup() {
+        rm -f "$PIPE"
+        kill "$TEE_PID"
+    }
+    trap cleanup EXIT  # Run cleanup when the script exits
 }
 
 get_cached_response() {
-    local url=$1
-    local cache_file="$CACHE_DIR/$(echo "$url" | md5sum | cut -d' ' -f1)"
+    url=$1
+    cache_file="$CACHE_DIR/$(echo "$url" | md5sum | cut -d' ' -f1)"
 
     if [ -f "$cache_file" ]; then
         cat "$cache_file"
@@ -74,43 +89,43 @@ webcheck() {
     _tmp=$(mktemp)
     get_cached_response "$_apiurl/packages" > "$_tmp"
     alpine_versions=$(html2text < "$_tmp" | grep -A1 Branch | head -1 | tr -d '\n' | tr -d ']' | cut -d/ -f2- | tr '/' ' ')
-    alpine_arches=$(html2text < "$_tmp" | sed -n '/Architecture\[/,/\]/ { /Architecture\[/ { s/.*\[//; h; d }; H; /\]/ { x; s/\n//g; p } }' | cut -d\: -f2 | tr [A-Z] [a-z] | tr '/' ' ' |tr -d ']' )
-    printf "\n%s/packages supports the following alpine versions and architectures:\n" "$_apiurl"
+    alpine_arches=$(html2text < "$_tmp" | sed -n '/Architecture\[/,/\]/ { /Architecture\[/ { s/.*\[//; h; d }; H; /\]/ { x; s/\n//g; p } }' | cut -d\: -f2 | tr [A-Z] [a-z] | tr '/' ' ' | tr -d ']')
+
+    printf "\n%s/packages supports the following Alpine versions and architectures:\n" "$_apiurl"
     printf "\t=> Versions: %s\n" "$alpine_versions"
     printf "\t=> Architectures: %s\n" "$alpine_arches"
+
     rm "$_tmp"
     exit 0
 }
 
 query() {
-    local query_string="$1"
-    local pattern="$2"
-    local branch="$3"
-    local arch="$4"
+    query_string=$1
+    pattern=$2
+    branch=$3
+    arch=$4
 
     echo -e "\n ==> Searching for '$pattern' in branch '$branch' for arch '$arch'...\n"
 
-    local response
     response=$(curl --max-time 10 --http2 -s -X GET "$_apiurl/contents?$query_string")
 
-    local html_file=$(mktemp)
-    local output_file=$(mktemp)
+    html_file=$(mktemp)
+    output_file=$(mktemp)
 
     echo "$response" > "$html_file"
 
-    html2text -width 200 -nobs -to_encoding ASCII "$html_file" | 
-        sed "s/&#x2F;/\//g" > "$output_file"
+    html2text -width 200 -nobs -to_encoding ASCII "$html_file" | sed "s/&#x2F;/\//g" > "$output_file"
 
     if grep -q "Contents filter" "$output_file"; then
-        local line_number=$(grep -n "File " "$output_file" | head -1 | cut -d: -f1)
+        line_number=$(grep -n "File " "$output_file" | head -1 | cut -d: -f1)
 
         if [ -n "$line_number" ]; then
             echo "File                                                 Package         Branch Repository Architecture"
             echo "---------------------------------------------------------------------------------------------------"
 
-            tail -n +$line_number "$output_file" |
+            tail -n +"$line_number" "$output_file" |
                 grep -v "Path\|Package name\|Branch\|Repository\|Contents filter" |
-                grep -v "^\s*$" | 
+                grep -v "^\s*$" |
                 grep -v "Privacy\|Policy\|Copy\|\*\|One of\|mips64" |
                 grep -E '^\/|^File' |
                 awk '{
@@ -121,14 +136,13 @@ query() {
                     }
                 }'
 
-            local match_count=$(tail -n +$line_number "$output_file" | grep -c "^/")
-            echo ""
-            echo "Found $match_count matches."
+            match_count=$(tail -n +"$line_number" "$output_file" | grep -c "^/")
+            echo -e "\nFound $match_count matches."
         else
             echo "No file data found in response."
         fi
     else
-        grep -v "^\s*$" "$output_file" | 
+        grep -v "^\s*$" "$output_file" |
             grep -v "Privacy\|Policy\|Copy\|\*\|Path\|Package name\|Branch\|Repository\|Architecture\|Contents filter\|One of\|mips64" |
             awk '{
                 if (NF >= 5 && $1 ~ /^\//) {
@@ -138,11 +152,10 @@ query() {
                 }
             }'
 
-        local match_count=$(grep -c "^/" "$output_file")
+        match_count=$(grep -c "^/" "$output_file")
 
         if [ "$match_count" -gt 0 ]; then
-            echo ""
-            echo "Found $match_count matches."
+            echo -e "\nFound $match_count matches."
         else
             echo "No matches found."
         fi
@@ -153,7 +166,7 @@ query() {
 }
 
 normalize_branch() {
-    local branch="$1"
+    branch=$1
     if echo "$branch" | grep -q '^[0-9]'; then
         echo "v$branch"
     else
@@ -185,45 +198,15 @@ branch="edge"
 
 if [ $# -ge 2 ]; then
     second_arg="$2"
-
     if echo "$second_arg" | grep -q '^v[0-9]' || echo "$second_arg" | grep -q '^[0-9]'; then
         branch=$(normalize_branch "$second_arg")
     else
         arch="$second_arg"
-
         if [ $# -ge 3 ]; then
             branch=$(normalize_branch "$3")
         fi
     fi
 fi
 
-valid_arch="x86_64 x86 aarch64 armhf ppc64le s390x armv7 riscv64 loongarch64 all"
-valid_branch="v3.21 v3.20 v3.19 v3.18 v3.17 v3.16 v3.15 v3.14 v3.13 v3.12 v3.11 v3.10 v3.9 v3.8 v3.7 v3.6 v3.5 v3.4 v3.3 edge all"
+query "file=$pattern&branch=$branch&arch=$arch" "$pattern" "$branch" "$arch"
 
-if ! echo "$valid_arch" | grep -qw "$arch"; then
-    printf "Invalid arch '%s'. Valid values are: %s\n" "$arch" "$valid_arch"
-    exit 1
-fi
-
-if ! echo "$valid_branch" | grep -qw "$branch"; then
-    printf "Invalid branch '%s'. Valid values are: %s\n" "$branch" "$valid_branch"
-    exit 1
-fi
-
-if [ "$branch" = "all" ]; then
-    if [ "$arch" = "all" ]; then
-        for b in $valid_branch; do
-            if [ "$b" != "all" ]; then
-                query "file=$pattern&branch=$b" "$pattern" "$b" "all"
-            fi
-        done
-    else
-        for b in $valid_branch; do
-            if [ "$b" != "all" ]; then
-                query "file=$pattern&branch=$b&arch=$arch" "$pattern" "$b" "$arch"
-            fi
-        done
-    fi
-else
-    query "file=$pattern&branch=$branch&arch=$arch" "$pattern" "$branch" "$arch"
-fi
