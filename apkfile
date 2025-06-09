@@ -175,6 +175,7 @@ normalize_branch() {
 }
 
 load_config
+check
 
 while getopts "hclv" opt; do
     case "$opt" in
