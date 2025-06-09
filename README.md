@@ -31,6 +31,7 @@ $ sudo make install
 
 ## Usage
 
+```
 $ apkfile
 usage: apkfile [-hclv] PATTERN [ARCH] [BRANCH]
 
