@@ -50,24 +50,21 @@ log_to_file() {
     PIPE=$(mktemp -u)
     mkfifo "$PIPE"
 
-    # Start tee in the background
     tee -a "$LOG_FILE" < "$PIPE" &
     TEE_PID=$!
 
-    # Redirect stdout and stderr to the pipe
     exec > "$PIPE" 2>&1
 
-    # Cleanup function
     cleanup() {
         rm -f "$PIPE"
-        kill "$TEE_PID"
+        kill "$TEE_PID" 2>/dev/null || true
     }
-    trap cleanup EXIT  # Run cleanup when the script exits
+    trap cleanup EXIT
 }
 
 get_cached_response() {
     url=$1
-    cache_file="$CACHE_DIR/$(echo "$url" | md5sum | cut -d' ' -f1)"
+    cache_file="$CACHE_DIR/$(echo "$url" | md5sum | cut -d ' ' -f1)"
 
     if [ -f "$cache_file" ]; then
         cat "$cache_file"
@@ -88,8 +85,9 @@ check() {
 webcheck() {
     _tmp=$(mktemp)
     get_cached_response "$_apiurl/packages" > "$_tmp"
-    alpine_versions=$(html2text < "$_tmp" | grep -A1 Branch | head -1 | tr -d '\n' | tr -d ']' | cut -d/ -f2- | tr '/' ' ')
-    alpine_arches=$(html2text < "$_tmp" | sed -n '/Architecture\[/,/\]/ { /Architecture\[/ { s/.*\[//; h; d }; H; /\]/ { x; s/\n//g; p } }' | cut -d\: -f2 | tr [A-Z] [a-z] | tr '/' ' ' | tr -d ']')
+    
+    alpine_versions=$(html2text < "$_tmp" | grep -A1 Branch | head -1 | tr -d '\n' | tr -d ']' | cut -d '/' -f2- | tr '/' ' ')
+    alpine_arches=$(html2text < "$_tmp" | sed -n '/Architecture\[/,/\]/ { /Architecture\[/ { s/.*\[//; h; d }; H; /\]/ { x; s/\n//g; p } }' | cut -d ':' -f2 | tr 'A-Z' 'a-z' | tr '/' ' ' | tr -d ']')
 
     printf "\n%s/packages supports the following Alpine versions and architectures:\n" "$_apiurl"
     printf "\t=> Versions: %s\n" "$alpine_versions"
@@ -105,7 +103,7 @@ query() {
     branch=$3
     arch=$4
 
-    echo -e "\n ==> Searching for '$pattern' in branch '$branch' for arch '$arch'...\n"
+    printf "\n ==> Searching for '%s' in branch '%s' for arch '%s'...\n\n" "$pattern" "$branch" "$arch"
 
     response=$(curl --max-time 10 --http2 -s -X GET "$_apiurl/contents?$query_string")
 
@@ -114,10 +112,10 @@ query() {
 
     echo "$response" > "$html_file"
 
-    html2text -width 200 -nobs -to_encoding ASCII "$html_file" | sed "s/&#x2F;/\//g" > "$output_file"
+    html2text -width 200 -nobs -to_encoding ASCII "$html_file" | sed 's|&#x2F;|/|g' > "$output_file"
 
     if grep -q "Contents filter" "$output_file"; then
-        line_number=$(grep -n "File " "$output_file" | head -1 | cut -d: -f1)
+        line_number=$(grep -n "File " "$output_file" | head -1 | cut -d ':' -f1)
 
         if [ -n "$line_number" ]; then
             echo "File                                                 Package         Branch Repository Architecture"
@@ -126,8 +124,8 @@ query() {
             tail -n +"$line_number" "$output_file" |
                 grep -v "Path\|Package name\|Branch\|Repository\|Contents filter" |
                 grep -v "^\s*$" |
-                grep -v "Privacy\|Policy\|Copy\|\*\|One of\|mips64" |
-                grep -E '^\/|^File' |
+                grep -v "Privacy\|Policy\|Copy|\*|One of\|mips64" |
+                grep -E '^/|^File' |
                 awk '{
                     if (NF >= 5) {
                         printf "%-50s %-15s %-7s %-12s %s\n", $1, $2, $3, $4, $5
@@ -137,13 +135,13 @@ query() {
                 }'
 
             match_count=$(tail -n +"$line_number" "$output_file" | grep -c "^/")
-            echo -e "\nFound $match_count matches."
+            printf "\nFound %s matches.\n" "$match_count"
         else
             echo "No file data found in response."
         fi
     else
         grep -v "^\s*$" "$output_file" |
-            grep -v "Privacy\|Policy\|Copy\|\*\|Path\|Package name\|Branch\|Repository\|Architecture\|Contents filter\|One of\|mips64" |
+            grep -v "Privacy\|Policy\|Copy|\*|Path\|Package name\|Branch\|Repository\|Architecture\|Contents filter\|One of\|mips64" |
             awk '{
                 if (NF >= 5 && $1 ~ /^\//) {
                     printf "%-50s %-15s %-7s %-12s %s\n", $1, $2, $3, $4, $5
@@ -155,7 +153,7 @@ query() {
         match_count=$(grep -c "^/" "$output_file")
 
         if [ "$match_count" -gt 0 ]; then
-            echo -e "\nFound $match_count matches."
+            printf "\nFound %s matches.\n" "$match_count"
         else
             echo "No matches found."
         fi
@@ -199,7 +197,7 @@ branch="edge"
 
 if [ $# -ge 2 ]; then
     second_arg="$2"
-    if echo "$second_arg" | grep -q '^v[0-9]' || echo "$second_arg" | grep -q '^[0-9]'; then
+    if echo "$second_arg" | grep -q '^v[0-9]\|^[0-9]'; then
         branch=$(normalize_branch "$second_arg")
     else
         arch="$second_arg"
@@ -210,4 +208,3 @@ if [ $# -ge 2 ]; then
 fi
 
 query "file=$pattern&branch=$branch&arch=$arch" "$pattern" "$branch" "$arch"
-
